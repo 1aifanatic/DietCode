@@ -6,7 +6,7 @@ Optimize your coding-agent sessions with **DietCode** — automatic context comp
 
 Every time you submit a prompt, the plugin (via hooks in Claude Code and Codex CLI, or via rules guidance in Cursor):
 
-1. **Classifies your intent** and prepends a one-line hint (e.g. `[DietCode intent: file_read (87%)]`) so the agent picks the right tool without guessing
+1. **Classifies your intent** so the agent picks the right tool without guessing
 2. **Compresses large contexts** automatically when you paste in a big codebase and ask a retrieval-style question — reducing token usage by 50–70% before the prompt reaches the model
 3. **Compresses large tool outputs** (`PostToolUse`) — `ls`, `grep`, `git diff/log/status` are structurally compacted with zero latency, and anything still large is run through Scaledown before it enters context
 4. **Tracks token savings** — every compression/summarization is counted, shown live in the Claude Code status line (`↓ 125.4K saved · 747 reqs`)
