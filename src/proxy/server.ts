@@ -82,8 +82,12 @@ async function pipeUpstream(
 
 export function createProxyServer(config: Config, client: ScaledownClient): Server {
   const { proxy } = config;
-  const summarize = (text: string, instructions?: string, messages?: unknown[]) =>
-    client.summarize(text, instructions, undefined, messages).then((r) => ({
+  // The structured `messages` are deliberately NOT forwarded: when the
+  // summarize endpoint receives them it skips the model and returns the
+  // transcript verbatim with only tool results stripped (~0% savings on
+  // prompt-heavy turns). The flattened `text` alone gets a real summary.
+  const summarize = (text: string, instructions?: string) =>
+    client.summarize(text, instructions).then((r) => ({
       summary: r.summary,
       inputChars: r.input_chars,
       outputChars: r.output_chars,
