@@ -178,9 +178,8 @@ function buildPreamble(summary: string, retrieveId: string): string {
   );
 }
 
-// Counts existing cache_control breakpoints in a `system` or `tools` array
-// (the only places besides messages Anthropic allows them, and the only two
-// this proxy never rewrites, so the count is stable request to request).
+// Counts existing cache_control breakpoints in a `system`, `tools` or message
+// content array.
 function countCacheControlBreakpoints(blocks: unknown): number {
   if (!Array.isArray(blocks)) return 0;
   return blocks.filter(
@@ -234,7 +233,12 @@ export async function transformRequest(
       : { ...state };
 
   let compacted = false;
-  let retrieveId = state.runningSummary ? putOriginal(state.runningSummary, state.runningSummary) : "";
+  // Reuse the id of the full transcript stored at the last fold, so the
+  // marker always points at the originals. State saved by older versions has
+  // no id; fall back to storing the summary itself.
+  let retrieveId =
+    working.retrieveId ??
+    (working.runningSummary ? putOriginal(working.runningSummary, working.runningSummary) : "");
   // ScaleDown-side dollar cost of a compaction step's own summarize call —
   // netted out of netSavingsUsd below so the reported number reflects total
   // spend, not just the Anthropic-side message-size delta. Priced in dollars
@@ -271,7 +275,7 @@ export async function transformRequest(
       if (summary && summary.trim()) {
         // Store the full aged transcript for sd_retrieve reversibility.
         retrieveId = putOriginal(serialize(messages.slice(0, boundary)), summary);
-        working = { runningSummary: summary, agedThrough: boundary, updatedAt: "" };
+        working = { runningSummary: summary, agedThrough: boundary, retrieveId, updatedAt: "" };
         compacted = true;
         const scaledownTokens = Math.ceil((result.inputChars + result.outputChars) / 4);
         summarizeCallCostUsd = scaledownTokens * SCALEDOWN_PER_TOKEN;
@@ -281,14 +285,26 @@ export async function transformRequest(
     }
   }
 
+  // Clients like Claude Code also put breakpoints on message blocks, so count
+  // the ones that survive the fold, not just system/tools — otherwise the
+  // added breakpoint can push the request past Anthropic's limit of 4 (400).
+  const unmarked = applySummary(messages, working, retrieveId, false);
+  const existingBreakpoints =
+    countCacheControlBreakpoints(body.system) +
+    countCacheControlBreakpoints(body.tools) +
+    unmarked.reduce(
+      (n, m) => n + (Array.isArray(m.content) ? countCacheControlBreakpoints(m.content) : 0),
+      0
+    );
   const addCacheControl =
     !config.cacheControlDisable &&
     !!working.runningSummary &&
     estimateTokens(working.runningSummary) >= MIN_CACHEABLE_TOKENS &&
-    countCacheControlBreakpoints(body.system) + countCacheControlBreakpoints(body.tools) <
-      MAX_CACHE_BREAKPOINTS;
+    existingBreakpoints < MAX_CACHE_BREAKPOINTS;
 
-  const forwarded = applySummary(messages, working, retrieveId, addCacheControl);
+  const forwarded = addCacheControl
+    ? applySummary(messages, working, retrieveId, true)
+    : unmarked;
   // Anthropic-side tokens avoided by folding — priced as cache reads, since
   // those tokens would otherwise sit in the live window and be re-read (at
   // minimum) on every subsequent request.

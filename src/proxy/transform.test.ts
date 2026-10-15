@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { resolve } from "path";
 import { transformRequest, type MessagesBody } from "./transform.js";
-import type { SessionState } from "./store.js";
+import { getOriginal, type SessionState } from "./store.js";
 import type { ProxyConfig } from "../config.js";
 
 // putOriginal/saveSessionState touch ~/.scaledown — sandbox HOME.
@@ -108,6 +108,22 @@ describe("at a compaction step (over threshold)", () => {
     const first = res.body.messages![0];
     const text = (first.content as Array<{ type: string; text: string }>)[0].text;
     expect(text).toContain("FRESH SUMMARY");
+  });
+
+  it("keeps pointing sd_retrieve at the full transcript on later requests", async () => {
+    const summarize = jest.fn().mockResolvedValue(summarizeResult("FRESH SUMMARY"));
+    const markerId = (r: { body: MessagesBody }) =>
+      /sd_retrieve\("([0-9a-f]+)"\)/.exec(
+        (r.body.messages![0].content as Array<{ text: string }>)[0].text
+      )![1];
+    const cfg = { ...baseConfig, compactThreshold: 1 };
+    const folded = await transformRequest(body(), { ...EMPTY }, cfg, { summarize });
+    const later = await transformRequest(body(), folded.state, { ...cfg, compactThreshold: 1e9 }, {
+      summarize,
+    });
+
+    expect(markerId(later)).toBe(markerId(folded));
+    expect(getOriginal(markerId(later))).toContain("u0 please do the first thing");
   });
 
   it("asks ScaleDown to dedupe repeated tool output rather than describe it", async () => {
@@ -261,6 +277,24 @@ describe("cache_control breakpoint on the folded summary", () => {
     const res = await transformRequest(b, state, { ...baseConfig, compactThreshold: 1e9 }, {
       summarize: jest.fn(),
     });
+    const block = (res.body.messages![0].content as Array<Record<string, unknown>>)[0];
+    expect(block.cache_control).toBeUndefined();
+  });
+
+  it("counts breakpoints on message blocks too (Claude Code marks recent messages)", async () => {
+    const state: SessionState = { runningSummary: bigSummary, agedThrough: 4, updatedAt: "" };
+    const b = body();
+    b.system = [
+      { type: "text", text: "SYSTEM A", cache_control: { type: "ephemeral" } },
+      { type: "text", text: "SYSTEM B", cache_control: { type: "ephemeral" } },
+    ];
+    b.messages![5] = { role: "assistant", content: [{ type: "text", text: "a2", cache_control: { type: "ephemeral" } }] };
+    b.messages![6] = { role: "user", content: [{ type: "text", text: "u3", cache_control: { type: "ephemeral" } }] };
+    const res = await transformRequest(b, state, { ...baseConfig, compactThreshold: 1e9 }, {
+      summarize: jest.fn(),
+    });
+    const all = JSON.stringify(res.body);
+    expect(all.split('"cache_control"').length - 1).toBe(4);
     const block = (res.body.messages![0].content as Array<Record<string, unknown>>)[0];
     expect(block.cache_control).toBeUndefined();
   });

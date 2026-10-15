@@ -346,6 +346,7 @@ Set these environment variables to tune behavior:
 | `SCALEDOWN_PROXY_PORT` | `8788` | Port for the foreground `dietcode proxy` (the `dietcode claude` wrapper uses an ephemeral port) |
 | `SCALEDOWN_PROXY_UPSTREAM` | `https://api.anthropic.com` | Upstream the proxy forwards to |
 | `SCALEDOWN_PROXY_DISABLE` | `false` | Set to `true` to make the proxy a pure passthrough (no compaction) |
+| `SCALEDOWN_PROXY_CACHE_CONTROL_DISABLE` | `false` | Set to `true` to stop the proxy marking the folded summary as a `cache_control` breakpoint (it already skips the marker when the request has Anthropic's maximum of 4) |
 
 ```bash
 export SCALEDOWN_COMPRESS_THRESHOLD=5000

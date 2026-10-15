@@ -29,6 +29,8 @@ export interface SessionState {
   runningSummary: string;
   /** Count of leading messages already folded into runningSummary. */
   agedThrough: number;
+  /** sd_retrieve id of the full transcript behind runningSummary (set at each fold). */
+  retrieveId?: string;
   updatedAt: string;
 }
 
@@ -63,6 +65,7 @@ export function loadSessionState(sessionId: string): SessionState {
       return {
         runningSummary: parsed.runningSummary ?? "",
         agedThrough: parsed.agedThrough ?? 0,
+        ...(parsed.retrieveId && { retrieveId: parsed.retrieveId }),
         updatedAt: parsed.updatedAt ?? "",
       };
     }
