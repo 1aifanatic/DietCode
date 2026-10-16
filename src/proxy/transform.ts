@@ -20,6 +20,11 @@
 // need to know how the backend uses that — only that the response shape
 // (summary + input/output chars) is the same either way.
 //
+// Note: the proxy's summarize (src/proxy/server.ts) currently drops the
+// structured blocks and sends only the flattened text, because the endpoint
+// skips the model when `messages` is present. See commit "proxy: stop sending
+// structured messages to the summarize endpoint".
+//
 // Cache safety: `system`, `tools`, and the verbatim tail are never modified.
 // The folded summary block is byte-identical between compaction steps (it is
 // derived from fixed history), so Anthropic's prompt cache keeps hitting; it
@@ -56,7 +61,8 @@ export interface SummarizeResult {
 export interface TransformDeps {
   /** Injected so tests can run without a live ScaledownClient. `messages` is
    * the structured aged chunk (tool_use/tool_result blocks intact), sent
-   * alongside the flattened text so the backend can process it structurally. */
+   * alongside the flattened text so the backend can process it structurally.
+   * (The proxy's implementation currently ignores it; see the note above.) */
   summarize: (
     text: string,
     instructions?: string,
@@ -294,7 +300,8 @@ export async function transformRequest(
       // Send structured blocks alongside the flattened `input` text — the
       // backend can process tool_use/tool_result content structurally when
       // `messages` is present, but still needs `input`/instructions for the
-      // existing-summary-merge framing either way.
+      // existing-summary-merge framing either way. (The proxy currently drops
+      // the blocks and sends only `input`; see the note at the top.)
       const result = await deps.summarize(input, SUMMARY_INSTRUCTIONS, newlyAged);
       const summary = result.summary;
       if (summary && summary.trim()) {
