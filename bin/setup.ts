@@ -300,13 +300,15 @@ async function main(): Promise<void> {
       err instanceof Error && "status" in err
         ? (err as { status: number }).status
         : null;
-    if (status === 401) {
+    // ScaleDown answers 403 (not 401) for a bad or empty key; saving it would
+    // make every later hook call and proxy fold fail.
+    if (status === 401 || status === 403) {
       console.error(
         "  ✗ Invalid API key. Check your key at https://scaledown.ai/dashboard"
       );
       process.exit(1);
     }
-    // Non-auth errors (network, 500) — warn but continue
+    // Non-auth errors (network, 5xx) — warn but continue
     console.warn(
       `  ⚠ Could not validate key (${String(err)}). Continuing anyway.`
     );
