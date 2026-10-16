@@ -202,6 +202,56 @@ describe("too few turns to compact", () => {
   });
 });
 
+describe("stored state from a different conversation", () => {
+  // Same system prompt and first message, different turns after it.
+  function other(): MessagesBody {
+    const b = body();
+    b.messages = sampleMessages()!.map((m, i) =>
+      i === 0 ? m : { ...m, content: `${String(m.content)} (other conversation)` }
+    );
+    return b;
+  }
+
+  it("is not applied when the folded prefix doesn't match", async () => {
+    const summarize = jest.fn().mockResolvedValue(summarizeResult("SUMMARY OF A"));
+    const folded = await transformRequest(body(), { ...EMPTY }, { ...baseConfig, compactThreshold: 1 }, {
+      summarize,
+    });
+    const res = await transformRequest(other(), folded.state, { ...baseConfig, compactThreshold: 1e9 }, {
+      summarize,
+    });
+
+    expect(res.body.messages).toEqual(other().messages);
+    expect(res.state.runningSummary).toBe("");
+  });
+
+  it("is still applied when only cache_control markers moved", async () => {
+    const summarize = jest.fn().mockResolvedValue(summarizeResult("SUMMARY OF A"));
+    const folded = await transformRequest(body(), { ...EMPTY }, { ...baseConfig, compactThreshold: 1 }, {
+      summarize,
+    });
+    const b = body();
+    b.messages![2] = {
+      role: "user",
+      content: [{ type: "text", text: "u1 now the second thing", cache_control: { type: "ephemeral" } }],
+    };
+    const res = await transformRequest(b, folded.state, { ...baseConfig, compactThreshold: 1e9 }, {
+      summarize,
+    });
+
+    expect(JSON.stringify(res.body.messages![0].content)).toContain("SUMMARY OF A");
+  });
+
+  it("trusts state saved before prefixHash existed", async () => {
+    const state: SessionState = { runningSummary: "LEGACY SUMMARY", agedThrough: 4, updatedAt: "" };
+    const res = await transformRequest(other(), state, { ...baseConfig, compactThreshold: 1e9 }, {
+      summarize: jest.fn(),
+    });
+
+    expect(JSON.stringify(res.body.messages![0].content)).toContain("LEGACY SUMMARY");
+  });
+});
+
 describe("turn-cadence trigger", () => {
   // recentTurns=2, so sampleMessages() (4 user prompts) only has 2 foldable
   // turns — below foldEveryTurns=3 — even with a token threshold of ~0.

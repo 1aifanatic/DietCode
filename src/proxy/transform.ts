@@ -31,7 +31,7 @@
 
 import { estimateTokens } from "../niah.js";
 import type { ProxyConfig } from "../config.js";
-import { putOriginal, type SessionState } from "./store.js";
+import { putOriginal, shortHash, type SessionState } from "./store.js";
 
 export interface AnthropicMessage {
   role: string;
@@ -187,6 +187,25 @@ function countCacheControlBreakpoints(blocks: unknown): number {
   ).length;
 }
 
+// Fingerprint of a run of messages, used to check that stored state was built
+// from this conversation. Keeps only what identifies the content (text, tool
+// ids) and ignores what clients rewrite between requests: cache_control
+// markers move every turn, and thinking blocks may be dropped or redacted.
+function prefixHash(messages: AnthropicMessage[]): string {
+  const parts = messages.map((m) => [
+    m.role,
+    ...normalizeContent(m.content).map((block) => {
+      if (!block || typeof block !== "object") return "";
+      const b = block as Record<string, unknown>;
+      if (b.type === "text") return `t:${String(b.text ?? "")}`;
+      if (b.type === "tool_use") return `u:${String(b.id ?? "")}`;
+      if (b.type === "tool_result") return `r:${String(b.tool_use_id ?? "")}`;
+      return "";
+    }).filter(Boolean),
+  ]);
+  return shortHash(JSON.stringify(parts));
+}
+
 // Folds the running summary into the first kept message (a user prompt) so the
 // forwarded message list stays role-valid (no extra/duplicate-role messages).
 // When `addCacheControl` is set, the injected summary block is marked as an
@@ -224,11 +243,17 @@ export async function transformRequest(
     return { body, savedTokens: 0, netSavingsUsd: 0, state, compacted: false };
   }
 
-  // Defensive: if history shrank below where we'd aged to (new/forked
-  // conversation reusing the id), reset rather than fold against a bad index.
+  // Defensive: if the stored state doesn't fit this request (history shrank
+  // below where we'd aged to, or the folded prefix isn't this conversation's —
+  // a new/forked conversation reusing the key), reset rather than replace this
+  // conversation's turns with another one's summary. State saved by older
+  // versions has no prefixHash and is trusted as before.
   let working: SessionState =
     state.agedThrough > messages.length ||
-    (state.agedThrough > 0 && !isUserPrompt(messages[state.agedThrough] ?? { role: "x", content: "" }))
+    (state.agedThrough > 0 && !isUserPrompt(messages[state.agedThrough] ?? { role: "x", content: "" })) ||
+    (state.agedThrough > 0 &&
+      state.prefixHash !== undefined &&
+      prefixHash(messages.slice(0, state.agedThrough)) !== state.prefixHash)
       ? { runningSummary: "", agedThrough: 0, updatedAt: "" }
       : { ...state };
 
@@ -275,7 +300,13 @@ export async function transformRequest(
       if (summary && summary.trim()) {
         // Store the full aged transcript for sd_retrieve reversibility.
         retrieveId = putOriginal(serialize(messages.slice(0, boundary)), summary);
-        working = { runningSummary: summary, agedThrough: boundary, retrieveId, updatedAt: "" };
+        working = {
+          runningSummary: summary,
+          agedThrough: boundary,
+          retrieveId,
+          prefixHash: prefixHash(messages.slice(0, boundary)),
+          updatedAt: "",
+        };
         compacted = true;
         const scaledownTokens = Math.ceil((result.inputChars + result.outputChars) / 4);
         summarizeCallCostUsd = scaledownTokens * SCALEDOWN_PER_TOKEN;
