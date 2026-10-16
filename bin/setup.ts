@@ -119,11 +119,14 @@ function storeApiKey(apiKey: string): void {
 
 function registerMcp(): void {
   const entryPoint = resolve(DIST_ROOT, "src", "index.js");
-  // Migrate the pre-rename MCP id if present (best-effort, ignore if absent).
-  try {
-    execSync("claude mcp remove --scope user scaledown", { stdio: "ignore" });
-  } catch {
-    // not registered under the old name — fine
+  // Remove the current id (re-running setup, e.g. to change the key, would
+  // otherwise fail with "already exists") and the pre-rename id. Best-effort.
+  for (const id of ["dietcode", "scaledown"]) {
+    try {
+      execSync(`claude mcp remove --scope user ${id}`, { stdio: "ignore" });
+    } catch {
+      // not registered under this id — fine
+    }
   }
   try {
     execSync(`claude mcp add --scope user dietcode -- node "${entryPoint}"`, {
