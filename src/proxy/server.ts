@@ -140,10 +140,10 @@ export function createProxyServer(config: Config, client: ScaledownClient): Serv
               `saved ~${result.savedTokens} tokens (~$${result.netSavingsUsd.toFixed(4)})\n`
           );
         }
-        // Attribute savings to Claude Code's session id when known, the same
+        // Attribute savings and requests to Claude Code's session id when known, the same
         // key the hooks use, so per-session stats line up.
         if (result.savedTokens > 0) addSaving(clientId ?? sessionId, result.savedTokens);
-        addRequest();
+        addRequest(clientId ?? sessionId);
         outBody = JSON.stringify(result.body);
       } catch (err) {
         // Fail-open: forward the original request unchanged.
