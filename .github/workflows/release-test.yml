@@ -32,6 +32,9 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+      - name: Test maintenance controls
+        run: npx jest src/maintenance.test.ts --runInBand
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         if: matrix.node == 20
