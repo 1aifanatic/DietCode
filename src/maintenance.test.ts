@@ -3,6 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "os";
 import { resolve } from "path";
 
+const version = JSON.parse(readFileSync(resolve("package.json"), "utf8")).version as string;
+const [major, minor, patch] = version.split(".").map(Number);
+const latest = `${major}.${minor}.${patch + 1}`;
+
 // Run built entry points in fresh processes so module-level paths use an
 // isolated home. Stub both external side effects before importing the code.
 const stubs = `
@@ -15,7 +19,7 @@ const stubs = `
   syncBuiltinESMExports();
   globalThis.fetch = async () => {
     console.log("FETCH");
-    return new Response(JSON.stringify({ version: "0.5.1" }));
+    return new Response(JSON.stringify({ version: "${latest}" }));
   };
 `;
 let testHome: string;
@@ -48,7 +52,7 @@ function run(code: string, overrides: NodeJS.ProcessEnv = {}): string {
 
 function cache(updateTriggered = false): void {
   writeFileSync(configPath, JSON.stringify({ apiKey: "fixture-key", _updateCache: {
-    latestVersion: "0.5.1", lastChecked: new Date().toISOString(), updateTriggered,
+    latestVersion: latest, lastChecked: new Date().toISOString(), updateTriggered,
   } }));
 }
 
@@ -73,7 +77,7 @@ it("suppresses cached notifications when checks are off", () => {
 it("checks for updates and notifies without installing by default", () => {
   const output = run(`await import('./dist/hooks/status.js');`, { SCALEDOWN_AUTO_RECONCILE: "false" });
   expect(output).toContain("FETCH");
-  expect(output).toContain("v0.5.1 available: npm i -g dietcode@latest");
+  expect(output).toContain(`v${latest} available: npm i -g dietcode@latest`);
   expect(output).not.toContain("SPAWN");
   expect(JSON.parse(readFileSync(configPath, "utf8"))._updateCache.updateTriggered).toBe(false);
   expect(readFileSync(settingsPath, "utf8")).toBe(settings);
@@ -93,7 +97,7 @@ it("installs a cached minor update only after explicit opt-in", () => {
     SCALEDOWN_AUTO_UPDATE: "true", SCALEDOWN_AUTO_RECONCILE: "false",
   });
   expect(output).toContain('SPAWN ["npm",["install","-g","dietcode@latest"]');
-  expect(output).toContain("updating to v0.5.1...");
+  expect(output).toContain(`updating to v${latest}...`);
   expect(output).not.toContain("FETCH");
   const config = JSON.parse(readFileSync(configPath, "utf8"));
   expect(config._updateCache.updateTriggered).toBe(true);
@@ -105,7 +109,7 @@ it("shows pending installations without starting another", () => {
   const output = run(`await import('./dist/hooks/status.js');`, {
     SCALEDOWN_AUTO_RECONCILE: "false", SCALEDOWN_AUTO_UPDATE: "true",
   });
-  expect(output).toContain("restart to activate v0.5.1");
+  expect(output).toContain(`restart to activate v${latest}`);
   expect(output).not.toContain("SPAWN");
 });
 
