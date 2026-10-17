@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { resolve } from "path";
 
@@ -13,7 +13,7 @@ beforeEach(() => {
     _updateCache: {
       lastChecked: new Date().toISOString(),
       lastReconciled: new Date().toISOString(),
-      latestVersion: "0.5.0",
+      latestVersion: JSON.parse(readFileSync(resolve("package.json"), "utf8")).version,
       updateTriggered: false,
     },
   }));
