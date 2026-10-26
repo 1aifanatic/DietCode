@@ -110,6 +110,11 @@ async function main(): Promise<void> {
     }
   }
 
+  if (config.classifyDisable) {
+    process.stdout.write("{}");
+    return;
+  }
+
   // Intent classification — fail-open. UserPromptSubmit cannot replace or
   // shrink the submitted prompt; the only supported output is extra context
   // (hookSpecificOutput.additionalContext), so the hint is all we emit.

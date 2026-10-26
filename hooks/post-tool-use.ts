@@ -456,7 +456,7 @@ const UNCHANGED: PostToolResult = { updatedToolOutput: null, saved: 0, requests:
 // after the replacement has actually been emitted.
 export async function processToolResponse(
   input: HookInput,
-  config: Pick<Config, "postToolDisable" | "postToolThreshold" | "compressRate">,
+  config: Pick<Config, "postToolDisable" | "postToolThreshold" | "postToolLocalOnly" | "compressRate">,
   client: PostToolClient
 ): Promise<PostToolResult> {
   const { tool_name, tool_input, tool_response } = input;
@@ -481,7 +481,9 @@ export async function processToolResponse(
       ? { updatedToolOutput: replaceText(tool_response, filtered), saved: structuralSaving, requests: 0 }
       : UNCHANGED;
 
-  if (estimateTokens(filtered) < config.postToolThreshold) return filteredResult;
+  if (config.postToolLocalOnly || estimateTokens(filtered) < config.postToolThreshold) {
+    return filteredResult;
+  }
 
   try {
     if (shouldSummarize(toolName, tool_input)) {

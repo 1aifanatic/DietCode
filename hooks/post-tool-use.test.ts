@@ -27,7 +27,7 @@ const COMPRESS_RESPONSE: CompressResponse = {
   },
 };
 
-const CONFIG = { postToolDisable: false, postToolThreshold: 4000, compressRate: 0.3 as const };
+const CONFIG = { postToolDisable: false, postToolThreshold: 4000, postToolLocalOnly: false, compressRate: 0.3 as const };
 
 function fakeClient() {
   return {

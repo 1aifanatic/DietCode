@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { ScaledownClient } from "../src/client.js";
 import { CONFIG_FILE } from "../src/config.js";
 import { CURSOR_RULES_CONTENT } from "../src/reconcile.js";
+import { cacheDir, clearProxyStore, sessionDir } from "../src/proxy/store.js";
 
 // TOML helpers (no external dep — we only need simple array-of-table writes)
 function tomlStringValue(s: string): string {
@@ -400,6 +401,9 @@ Environment variables:
   SCALEDOWN_COMPACT_THRESHOLD=N      — context % that triggers compaction (default: 50)
   SCALEDOWN_SHOW_PROGRESS=false      — disable the per-turn context progress bar
   SCALEDOWN_POST_TOOL_DISABLE=true   — disable post-tool compression
+  SCALEDOWN_POST_TOOL_LOCAL_ONLY=true — post-tool structural filter only (never sends tool output)
+  SCALEDOWN_CLASSIFY_DISABLE=true    — skip intent classification (never sends prompts)
+  SCALEDOWN_LOCAL_ONLY=true          — no Scaledown requests at all (no API key needed)
   SCALEDOWN_POST_TOOL_THRESHOLD=N    — token threshold for tool output compression (default: 4000)
   SCALEDOWN_PROXY_COMPACT_THRESHOLD=N — tokens that trigger a proxy compaction step (default: 50000)
   SCALEDOWN_PROXY_RECENT_TURNS=N     — recent turns kept verbatim by the proxy (default: 4)
@@ -454,7 +458,8 @@ async function uninstall(): Promise<void> {
 
 Left in place (remove manually if you want them gone):
   • Package:   npm uninstall -g dietcode
-  • API key + stats:  rm -rf ~/.scaledown
+  • API key + stats + proxy cache:  rm -rf ~/.scaledown
+    (just the proxy cache: dietcode clear-cache)
   • Shell env vars in your ~/.zshrc / ~/.bashrc (SCALEDOWN_API_KEY, CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
   • Cursor/Codex MCP server entries you added by hand
 
@@ -462,10 +467,20 @@ Restart your coding tool for changes to take effect.
 `);
 }
 
+function clearCache(): void {
+  const { sessions, originals } = clearProxyStore();
+  console.log(
+    `Removed ${sessions} proxy session file(s) from ${sessionDir()}\n` +
+      `Removed ${originals} stashed original(s) from ${cacheDir()}\n` +
+      "sd_retrieve can no longer recover text summarized before this point."
+  );
+}
+
 const command = process.argv[2];
 
 async function dispatch(): Promise<void> {
   if (command === "uninstall") return uninstall();
+  if (command === "clear-cache") return clearCache();
   if (command === "proxy" || command === "claude") {
     const { runProxy, runClaudeWrapper } = await import("./proxy.js");
     return command === "claude"

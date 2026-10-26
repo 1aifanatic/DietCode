@@ -303,6 +303,69 @@ Use sd_retrieve("<id from the marker>") to pull back the full original text
 
 ---
 
+## Data flows & privacy
+
+DietCode sends text to the **Scaledown API** (`https://api.scaledown.xyz`, or
+`SCALEDOWN_BASE_URL`), authenticated with your `SCALEDOWN_API_KEY`. Here is
+exactly what leaves your machine, and the setting that turns off each path:
+
+| Stage | When | What is sent | Endpoint | Turn it off |
+|---|---|---|---|---|
+| Intent classification (`UserPromptSubmit`) | Every non-empty prompt, regardless of size | The **full prompt text** + the fixed intent labels | `/classify` | `SCALEDOWN_CLASSIFY_DISABLE=true` |
+| Tool-output compression (`PostToolUse`) | A tool result is still above `SCALEDOWN_POST_TOOL_THRESHOLD` (default 4000 tokens) after the local filter | That **tool output** — command output, or **file contents** for Read | `/compress/raw/` (code, command output) or `/summarization/abstractive` (non-code files) | `SCALEDOWN_POST_TOOL_LOCAL_ONLY=true` (keep local filter) or `SCALEDOWN_POST_TOOL_DISABLE=true` (hook does nothing) |
+| Proxy compaction (`dietcode claude` / `dietcode proxy`) | A conversation passes the proxy's compaction threshold | **Older conversation turns**: flattened text **and** the structured message blocks (including `tool_use`/`tool_result` content) | `/summarization/abstractive` | `SCALEDOWN_PROXY_DISABLE=true` (proxy becomes a pure passthrough) |
+| Setup key check (`dietcode setup`) | Once, when you enter a key | The word `test` | `/classify` | Don't run setup; set the key manually |
+
+Not sent to Scaledown: the `ls`/`grep`/`git` structural filters, the context
+progress bar, and `sd_retrieve` all run locally. The proxy forwards your
+requests to `SCALEDOWN_PROXY_UPSTREAM` (Anthropic by default), as Claude
+Code would on its own. The Claude Code status line checks
+`https://registry.npmjs.org/dietcode/latest` for updates at most once every 24h.
+
+The settings are independent: for example, turning off classification
+leaves tool-output compression and the proxy as they are.
+
+### Local-only mode
+
+`SCALEDOWN_LOCAL_ONLY=true` turns off every remote stage: no classification,
+tool output filtered locally only, proxy passthrough. It also works without an
+API key. You keep the zero-latency `ls`/`grep`/`git` compaction and lose
+Scaledown compression, summarization and intent hints. Automated tests check
+that the hooks and proxy make no Scaledown requests in this mode.
+
+### What is stored locally
+
+Everything lives under `~/.scaledown/`:
+
+| Path | Contents | Retention |
+|---|---|---|
+| `config.json` | Your API key (if saved by `dietcode setup`) | Until you delete it |
+| `stats.json` | Token/request counters and the last context-window size, with no prompt or output text | Until you delete it |
+| `proxy/<session>.json` | Per-conversation running summary (summarized conversation text) | **No automatic expiry** |
+| `proxy-cache/<hash>.json` | Original text of each block the proxy replaced, kept so `sd_retrieve` can restore it | **No automatic expiry** |
+
+To delete the proxy files (summaries and stashed originals) without touching
+your key or stats, run:
+
+```bash
+dietcode clear-cache
+```
+
+`sd_retrieve` can't recover text summarized before that point. To remove
+everything, run `rm -rf ~/.scaledown`.
+
+### Service terms
+
+This repository's MIT license covers the client code only. It says nothing about
+how the Scaledown service handles what it receives. As of 2026-10-26 we couldn't
+find a published privacy policy, terms of service, or data-retention/training
+statement for the Scaledown API at [scaledown.ai](https://scaledown.ai) or
+[docs.scaledown.ai](https://docs.scaledown.ai). **Maintainers: link them here.**
+Until they're linked, treat everything in the table above as shared with a third party,
+or use local-only mode.
+
+---
+
 ## Configuration
 
 ### Changing your API key
@@ -328,7 +391,11 @@ Set these environment variables to tune behavior:
 
 | Variable | Default | Description |
 |---|---|---|
-| `SCALEDOWN_API_KEY` | — | **Required.** Your Scaledown API key |
+| `SCALEDOWN_API_KEY` | — | **Required** unless `SCALEDOWN_LOCAL_ONLY=true`. Your Scaledown API key |
+| `SCALEDOWN_BASE_URL` | `https://api.scaledown.xyz` | Scaledown API endpoint every remote stage calls |
+| `SCALEDOWN_LOCAL_ONLY` | `false` | Set to `true` to make **no** Scaledown requests: implies the three settings below plus `SCALEDOWN_PROXY_DISABLE`. No API key needed. See [Data flows & privacy](#data-flows--privacy) |
+| `SCALEDOWN_CLASSIFY_DISABLE` | `false` | Set to `true` to skip per-prompt intent classification, so prompts are never sent. Tool-output compression is unaffected |
+| `SCALEDOWN_POST_TOOL_LOCAL_ONLY` | `false` | Set to `true` to keep only the local structural filter for tool output (`ls`/`grep`/`git`). Tool output is never sent |
 | `SCALEDOWN_COMPRESS_RATE` | `0.3` | How aggressively tool output is compressed (`0.3` = keep ~30% of tokens; `auto` lets the API decide) |
 | `SCALEDOWN_POST_TOOL_DISABLE` | `false` | Set to `true` to disable `PostToolUse` tool-output compression |
 | `SCALEDOWN_POST_TOOL_THRESHOLD` | `4000` | Token threshold above which tool output is sent to the API (after structural filtering) |

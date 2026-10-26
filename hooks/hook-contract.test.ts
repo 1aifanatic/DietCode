@@ -64,19 +64,27 @@ beforeEach(() => {
 
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
-function runHook(name: string, input: unknown): Promise<{ stdout: string; json: Record<string, unknown> }> {
+function runHook(
+  name: string,
+  input: unknown,
+  env: Record<string, string | undefined> = {}
+): Promise<{ stdout: string; json: Record<string, unknown> }> {
   return new Promise((done, fail) => {
     const child = execFile(
       process.execPath,
       [join(DIST_HOOKS, name)],
       {
-        env: {
-          PATH: process.env.PATH,
-          HOME: home,
-          USERPROFILE: home,
-          SCALEDOWN_API_KEY: "test-key",
-          SCALEDOWN_BASE_URL: baseUrl,
-        },
+        // Drop undefined entries so a test can unset a variable (e.g. the API key).
+        env: Object.fromEntries(
+          Object.entries({
+            PATH: process.env.PATH,
+            HOME: home,
+            USERPROFILE: home,
+            SCALEDOWN_API_KEY: "test-key",
+            SCALEDOWN_BASE_URL: baseUrl,
+            ...env,
+          }).filter(([, v]) => v !== undefined)
+        ) as NodeJS.ProcessEnv,
         timeout: 15000,
       },
       (err, stdout) => {
@@ -172,4 +180,74 @@ describeIfBuilt("UserPromptSubmit hook contract", () => {
     const { json } = await runHook("user-prompt-submit.js", { session_id: "s1", prompt: "hello" });
     expect(json).toEqual({});
   }, 20000);
+});
+
+const LS_OUTPUT = [
+  "total 48",
+  "drwxr-xr-x  2 user  staff    64 Jan  1 12:00 src",
+  "drwxr-xr-x  2 user  staff    64 Jan  1 12:00 node_modules",
+  "-rw-r--r--  1 user  staff  1234 Jan  1 12:00 package.json",
+].join("\n");
+
+function filteredStdout(json: Record<string, unknown>): string {
+  const out = json.hookSpecificOutput as { updatedToolOutput: { stdout: string } };
+  return out.updatedToolOutput.stdout;
+}
+
+describeIfBuilt("per-stage cloud controls (no request when disabled)", () => {
+  it("SCALEDOWN_CLASSIFY_DISABLE: prompt is never sent", async () => {
+    const { json } = await runHook(
+      "user-prompt-submit.js",
+      { session_id: "s1", prompt: "find the auth handler" },
+      { SCALEDOWN_CLASSIFY_DISABLE: "true" }
+    );
+    expect(json).toEqual({});
+    expect(apiCalls).toEqual([]);
+  }, 20000);
+
+  it("SCALEDOWN_CLASSIFY_DISABLE leaves tool-output compression on", async () => {
+    const { json } = await runHook("post-tool-use.js", bash("npm run build", LARGE), {
+      SCALEDOWN_CLASSIFY_DISABLE: "true",
+    });
+    expect(filteredStdout(json)).toBe("compressed tool output");
+    expect(apiCalls).toEqual(["/compress/raw/"]);
+  }, 20000);
+
+  it("SCALEDOWN_POST_TOOL_LOCAL_ONLY: large output stays local and unchanged", async () => {
+    const { json } = await runHook("post-tool-use.js", bash("npm run build", LARGE), {
+      SCALEDOWN_POST_TOOL_LOCAL_ONLY: "true",
+    });
+    expect(json).toEqual({});
+    expect(apiCalls).toEqual([]);
+  }, 20000);
+
+  it("SCALEDOWN_POST_TOOL_LOCAL_ONLY still applies the structural filter", async () => {
+    const { json } = await runHook("post-tool-use.js", bash("ls -l", LS_OUTPUT), {
+      SCALEDOWN_POST_TOOL_LOCAL_ONLY: "true",
+    });
+    expect(filteredStdout(json)).toContain("Summary: 1 files, 1 dirs");
+    expect(apiCalls).toEqual([]);
+  }, 20000);
+
+  describe("SCALEDOWN_LOCAL_ONLY without an API key", () => {
+    const LOCAL = { SCALEDOWN_LOCAL_ONLY: "true", SCALEDOWN_API_KEY: undefined };
+
+    it("UserPromptSubmit makes no request", async () => {
+      const { json } = await runHook("user-prompt-submit.js", { session_id: "s1", prompt: "hi" }, LOCAL);
+      expect(json).toEqual({});
+      expect(apiCalls).toEqual([]);
+    }, 20000);
+
+    it("PostToolUse filters ls output locally", async () => {
+      const { json } = await runHook("post-tool-use.js", bash("ls -l", LS_OUTPUT), LOCAL);
+      expect(filteredStdout(json)).toContain("Summary: 1 files, 1 dirs");
+      expect(apiCalls).toEqual([]);
+    }, 20000);
+
+    it("PostToolUse never sends large output", async () => {
+      const { json } = await runHook("post-tool-use.js", bash("npm run build", LARGE), LOCAL);
+      expect(json).toEqual({});
+      expect(apiCalls).toEqual([]);
+    }, 20000);
+  });
 });
